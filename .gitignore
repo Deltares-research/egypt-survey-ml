@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local data (not for version control)
+ERF_Data/Data/
+ERF_Data/Data_Cleaning/*.csv
