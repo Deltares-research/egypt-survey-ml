@@ -220,3 +220,11 @@ __marimo__/
 # Local data (not for version control)
 ERF_Data/Data/
 ERF_Data/Data_Cleaning/*.csv
+notebooks/*.csv
+notebooks/*.png
+
+# Catboost
+notebooks/catboost_info/
+
+.python-version
+.vscode/

@@ -24,5 +24,14 @@ dependencies = [
     "shap>=0.52.0",
 ]
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
 [tool.uv.sources]
 food-security = { git = "https://github.com/Deltares-research/Food-Security.git", branch = "main" }
