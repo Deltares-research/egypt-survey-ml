@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier, CatBoostRegressor, Pool
 
-from .predict import EnsembleMember, _as_model
+from .predict import EnsembleMember, _as_model, model_columns
 
 
 def catboost_shap(model, frame):
@@ -100,9 +100,12 @@ def combined_shap(
 
     total, feature_total, base, weight = None, None, 0.0, None
     for member in members:
-        real = dataset.realization(sex, member.seed, excel_df=excel_df)
         clf = _as_model(member.classifier, CatBoostClassifier)
         reg = _as_model(member.regressor, CatBoostRegressor)
+        columns, categorical = model_columns(clf, reg)
+        real = dataset.realization(
+            sex, member.seed, excel_df=excel_df, columns=columns, categorical=categorical
+        )
         shap_cls, base_cls = catboost_shap(clf, real.frame)
         shap_reg, base_reg = catboost_shap(reg, real.frame)
         phi, phi_base = combine_shap(shap_cls, base_cls, shap_reg, base_reg)

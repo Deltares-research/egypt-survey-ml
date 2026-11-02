@@ -167,8 +167,9 @@ class FakeDataset:
         self.wages = np.array(wages)
         self.calls = []
 
-    def realization(self, sex, seed, excel_df=None):
+    def realization(self, sex, seed, excel_df=None, columns=(), categorical=()):
         self.calls.append((sex, seed, excel_df))
+        self.requested = (list(columns), list(categorical))
         frame = pd.DataFrame(
             {
                 "x": [1.0, 2.0, 3.0],
@@ -203,9 +204,9 @@ def test_predict_ensemble_stacks_members_and_uses_member_seeds():
 
 def test_predict_ensemble_rejects_draws_with_different_respondents():
     class Drifting(FakeDataset):
-        def realization(self, sex, seed, excel_df=None):
+        def realization(self, sex, seed, excel_df=None, **kwargs):
             self.wages = self.wages + seed
-            return super().realization(sex, seed, excel_df)
+            return super().realization(sex, seed, excel_df, **kwargs)
 
     members = [EnsembleMember(s, FakeClassifier(0.1), FakeRegressor()) for s in (1, 2)]
     with pytest.raises(ValueError, match="respondents differ"):
@@ -215,6 +216,28 @@ def test_predict_ensemble_rejects_draws_with_different_respondents():
 def test_predict_ensemble_requires_members():
     with pytest.raises(ValueError):
         predict_ensemble(FakeDataset(), [], "female")
+
+
+def test_predict_ensemble_requests_the_columns_its_models_need():
+    ds = FakeDataset()
+    predict_ensemble(
+        ds, [EnsembleMember(42, FakeClassifier(0.1), FakeRegressor())], "female"
+    )
+    assert ds.requested == (["x", "y"], [])
+
+
+@pytest.mark.parametrize("model_kind", ["classifier", "regressor"])
+def test_predict_ensemble_reports_features_missing_from_data(model_kind):
+    classifier = FakeClassifier(0.1)
+    regressor = FakeRegressor()
+    model = classifier if model_kind == "classifier" else regressor
+    model.feature_names_ = ["x", "water_productivity"]
+    member = EnsembleMember(42, classifier, regressor)
+    with pytest.raises(
+        ValueError,
+        match=f"Incompatible female {model_kind}.*seed 42.*water_productivity",
+    ):
+        predict_ensemble(FakeDataset(), [member], "female")
 
 
 def test_to_frame_returns_inputs_with_predictions():

@@ -73,7 +73,7 @@ class FakeDataset:
     def __init__(self, frame):
         self.frame = frame
 
-    def realization(self, sex, seed, excel_df=None):
+    def realization(self, sex, seed, excel_df=None, **kwargs):
         units = np.array(["A", "B"] * (len(self.frame) // 2))
         return Realization(seed, 2, self.frame, np.ones(len(self.frame)), units)
 

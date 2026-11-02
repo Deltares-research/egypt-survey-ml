@@ -7,7 +7,8 @@ whole pipeline and returns a :class:`Dataset` holding every intermediate object.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -300,9 +301,21 @@ def select_features(masking_df, agri_pool, config: DatasetConfig) -> FeatureSpec
     )
 
 
-def build_feature_frame(pool_with_geo, sex_code, excel_df, features: FeatureSpec):
-    """Per-sex model frame. Returns (frame, categorical columns, extra_info with pweight/command_unit)."""
-    cols = features.columns_for(sex_code)
+def build_feature_frame(
+    pool_with_geo,
+    sex_code,
+    excel_df,
+    features: FeatureSpec,
+    extra_cols=(),
+    extra_cats=(),
+):
+    """Per-sex model frame. Returns (frame, categorical columns, extra_info with pweight/command_unit).
+
+    Columns of the mask-based ``features`` that are not in the survey or command-area data
+    are skipped. ``extra_cols`` / ``extra_cats`` add columns (e.g. those a saved model
+    was trained on) on top of the mask selection; ``extra_cats`` are cast to str.
+    """
+    cols = list(dict.fromkeys(features.columns_for(sex_code) + list(extra_cols)))
     frame = (
         pool_with_geo[pool_with_geo["sex"] == sex_code]
         .merge(excel_df, left_on="command_unit", right_on="area", how="inner")
@@ -317,7 +330,11 @@ def build_feature_frame(pool_with_geo, sex_code, excel_df, features: FeatureSpec
     frame = frame.dropna(subset=["log1p_wage"])
     extra_info = frame[["pweight", "command_unit"]]
     frame = frame[keep]
-    cats = [c for c in features.categorical_columns if c in frame.columns]
+    cats = [
+        c
+        for c in dict.fromkeys(list(features.categorical_columns) + list(extra_cats))
+        if c in frame.columns
+    ]
     # With pandas 3 .astype(str) keeps NaN as a missing value, but CatBoost's cat_features
     # cannot contain NaN, so fill explicitly first.
     frame[cats] = frame[cats].fillna("missing").astype(str)
@@ -479,12 +496,16 @@ class Dataset:
     def assign_command_units(self, pool, seed):
         return assign_command_units(pool, seed, self.distribution_df)
 
-    def build_feature_frame(self, pool_with_geo, sex_code, excel_df=None):
+    def build_feature_frame(
+        self, pool_with_geo, sex_code, excel_df=None, extra_cols=(), extra_cats=()
+    ):
         return build_feature_frame(
             pool_with_geo,
             sex_code,
             self.excel_df if excel_df is None else excel_df,
             self.features,
+            extra_cols,
+            extra_cats,
         )
 
     def outlier_cap(self, sex):
@@ -494,14 +515,20 @@ class Dataset:
             else self.config.female_outlier_cap
         )
 
-    def realization(self, sex, seed, excel_df=None) -> Realization:
+    def realization(
+        self, sex, seed, excel_df=None, columns=(), categorical=()
+    ) -> Realization:
         """Test set of ``sex`` ("male"/"female") for the command-unit draw given by ``seed``.
 
         ``excel_df`` swaps in other command-area covariates (e.g. another RIBASIM run).
+        ``columns`` / ``categorical`` add the features a saved model needs on top of the
+        feature mask (see :func:`egypt_survey_ml.predict.model_columns`).
         """
         sex_code = SEX_CODES[sex]
         geo = self.assign_command_units(self.test_pool, seed)
-        frame, _, extra = self.build_feature_frame(geo, sex_code, excel_df)
+        frame, _, extra = self.build_feature_frame(
+            geo, sex_code, excel_df, columns, categorical
+        )
         keep = (frame["totwag_all"] < self.outlier_cap(sex)).to_numpy()
         return Realization(
             seed=seed,
@@ -539,13 +566,33 @@ class Dataset:
 
 
 def prepare_dataset(
-    config: DatasetConfig | None = None, paths: DataPaths | None = None
+    config: DatasetConfig | None = None,
+    paths: DataPaths | None = None,
+    *,
+    mask_path: str | Path | None = None,
 ) -> Dataset:
-    """Run the full dataset pipeline for the given scenario settings."""
+    """Run the full dataset pipeline for the given scenario settings.
+
+    ``mask_path`` overrides only the column-selection workbook (default:
+    ``Result/correlation.xlsx``), not the command-area data workbook. Its ``Sheet1`` must
+    contain ``variable``, ``correl`` (1 selects a feature) and ``type`` (``binary`` /
+    ``categorical`` mark categorical features). Selected columns that exist in neither the
+    survey nor the command-area data are skipped, as in the training notebooks.
+    """
     config = config or DatasetConfig()
     paths = paths or resolve_data_paths(config.data_filename)
+    if mask_path is not None:
+        paths = replace(paths, mask_xlsx=Path(mask_path).expanduser())
     print(f"data source: {paths.source}")
     paths.report()
+
+    masking_df = pd.read_excel(paths.mask_xlsx, sheet_name="Sheet1")
+    missing = {"variable", "correl", "type"} - set(masking_df.columns)
+    if missing:
+        raise ValueError(
+            f"Feature mask {paths.mask_xlsx} (Sheet1) is missing required columns: "
+            f"{sorted(missing)}"
+        )
 
     df, hh = load_survey(paths)
     household = build_household_context(df, hh)
@@ -569,8 +616,14 @@ def prepare_dataset(
         f"(already scaled -- no rural-population normalization needed for this sheet)"
     )
 
-    masking_df = pd.read_excel(paths.mask_xlsx, sheet_name="Sheet1")
     features = select_features(masking_df, agri_pool, config)
+    unavailable = [
+        c
+        for c in features.base_cols
+        if c not in train_pool.columns and c not in excel_df.columns
+    ]
+    if unavailable:
+        print(f"Skipped (selected in mask, not in the data): {unavailable}")
 
     return Dataset(
         config=config,

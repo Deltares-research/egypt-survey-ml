@@ -235,14 +235,27 @@ class EnsemblePrediction:
         return out
 
 
+def model_columns(*models):
+    """(feature names, categorical feature names) the given fitted CatBoost models were trained on."""
+    cols, cats = [], []
+    for model in models:
+        names = list(model.feature_names_)
+        cols += names
+        get_cat = getattr(model, "get_cat_feature_indices", None)
+        cats += [names[i] for i in get_cat()] if get_cat else []
+    return list(dict.fromkeys(cols)), list(dict.fromkeys(cats))
+
+
 def predict_ensemble(
     dataset, members: Sequence[EnsembleMember], sex, excel_df=None, keep_inputs=False
 ) -> EnsemblePrediction:
     """Run every member on the test set of ``sex`` under its own command-unit draw.
 
-    ``dataset`` only needs a ``realization(sex, seed, excel_df)`` method (see
-    ``egypt_survey_ml.dataset.Dataset``). Each model picks its own feature columns, so
-    models trained with or without RIBASIM features work without extra arguments.
+    ``dataset`` only needs a ``realization(sex, seed, excel_df, columns, categorical)``
+    method (see ``egypt_survey_ml.dataset.Dataset``). Each model uses the feature columns
+    it was trained on, requested from the dataset on top of the feature mask, so models
+    trained with different feature sets work without extra arguments as long as those
+    columns exist in the survey or command-area data.
     ``excel_df`` swaps in other command-area covariates (e.g. another RIBASIM run).
     With ``keep_inputs=True`` the model input of every member is kept, so that
     ``EnsemblePrediction.to_frame()`` can return the input data with the predictions.
@@ -253,9 +266,20 @@ def predict_ensemble(
 
     cls_prob, reg_pred, units, static, inputs = [], [], [], None, []
     for member in members:
-        real = dataset.realization(sex, member.seed, excel_df=excel_df)
         clf = _as_model(member.classifier, CatBoostClassifier)
         reg = _as_model(member.regressor, CatBoostRegressor)
+        columns, categorical = model_columns(clf, reg)
+        real = dataset.realization(
+            sex, member.seed, excel_df=excel_df, columns=columns, categorical=categorical
+        )
+        for label, model in (("classifier", clf), ("regressor", reg)):
+            missing = [c for c in model.feature_names_ if c not in real.frame.columns]
+            if missing:
+                raise ValueError(
+                    f"Incompatible {sex} {label} (seed {member.seed}): features absent "
+                    f"from the survey and command-area data: {missing}. "
+                    "Check data_filename or use models trained on the available data."
+                )
         cls_prob.append(clf.predict_proba(real.frame[clf.feature_names_])[:, 1])
         reg_pred.append(reg.predict(real.frame[reg.feature_names_]))
         units.append(real.command_unit)
