@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 
 ZERO_HANDLING_MODES = ("none", "drop_random", "lognormal_synthetic")
+COLUMN_LISTS = (
+    "male_extra_columns",
+    "female_extra_columns",
+    "male_exclude_columns",
+    "female_exclude_columns",
+)
 
 
 @dataclass
@@ -14,6 +20,12 @@ class DatasetConfig:
     Create one with keyword overrides (``DatasetConfig(include_ribasim=True)``),
     derive variants with :meth:`replace`, or build one from a plain dict / TOML file
     with :meth:`from_dict` / :meth:`from_toml`.
+
+    The feature columns start from the ``correl == 1`` variables of the feature mask.
+    ``male_extra_columns`` / ``female_extra_columns`` add columns for one sex (also
+    mask variables with ``correl == 0``), ``male_exclude_columns`` /
+    ``female_exclude_columns`` remove columns for one sex; exclusion wins over everything
+    else. Extra columns that are not in the loaded data are skipped with a warning.
     """
 
     rng_seed: int = 42
@@ -24,6 +36,12 @@ class DatasetConfig:
     include_empstab: bool = True
     include_hrswk: bool = True
     include_ribasim: bool = False
+
+    # per-sex feature columns, on top of / removed from the feature mask
+    male_extra_columns: list[str] = field(default_factory=list)
+    female_extra_columns: list[str] = field(default_factory=list)
+    male_exclude_columns: list[str] = field(default_factory=list)
+    female_exclude_columns: list[str] = field(default_factory=list)
 
     # zero-wage handling: one of ZERO_HANDLING_MODES
     zero_handling: str = "drop_random"
@@ -41,6 +59,11 @@ class DatasetConfig:
     data_filename: str = "data_correlation.xlsx"
 
     def __post_init__(self):
+        for name in COLUMN_LISTS:
+            value = getattr(self, name)
+            if isinstance(value, str):
+                raise ValueError(f"{name} must be a list of column names, got {value!r}")
+            setattr(self, name, list(value))
         if self.zero_handling not in ZERO_HANDLING_MODES:
             raise ValueError(
                 f"zero_handling must be one of {ZERO_HANDLING_MODES}, "

@@ -253,16 +253,26 @@ def model_columns(*models):
 
 
 def predict_ensemble(
-    dataset, members: Sequence[EnsembleMember], sex, excel_df=None, keep_inputs=False
+    dataset,
+    members: Sequence[EnsembleMember],
+    sex,
+    excel_df=None,
+    keep_inputs=False,
+    governorates=None,
 ) -> EnsemblePrediction:
     """Run every member on the test set of ``sex`` under its own command-unit draw.
 
-    ``dataset`` only needs a ``realization(sex, seed, excel_df, columns, categorical)``
-    method (see ``egypt_survey_ml.dataset.Dataset``). Each model uses the feature columns
-    it was trained on, requested from the dataset on top of the feature mask, so models
-    trained with different feature sets work without extra arguments as long as those
-    columns exist in the survey or command-area data.
+    ``dataset`` only needs a ``realization(sex, seed, excel_df, columns, categorical,
+    zero_handling)`` method (see ``egypt_survey_ml.dataset.Dataset``). Each model uses the
+    feature columns it was trained on, requested from the dataset on top of the feature mask,
+    so models trained with different feature sets work without extra arguments as long as
+    those columns exist in the survey or command-area data.
+    The test set always holds all respondents, paid and unpaid, whatever the zero handling
+    of the training data: P(paid) * wage is a prediction for everyone, so it must be scored
+    against everyone's income.
     ``excel_df`` swaps in other command-area covariates (e.g. another RIBASIM run).
+    ``governorates`` (names in the ``NAME1_`` column; default ``None`` = all) restricts the
+    respondents to those governorates; it is passed on to ``dataset.realization``.
     With ``keep_inputs=True`` the model input of every member is kept, so that
     ``EnsemblePrediction.to_frame()`` can return the input data with the predictions.
     """
@@ -281,6 +291,8 @@ def predict_ensemble(
             excel_df=excel_df,
             columns=columns,
             categorical=categorical,
+            zero_handling="none",
+            governorates=governorates,
         )
         for label, model in (("classifier", clf), ("regressor", reg)):
             missing = [c for c in model.feature_names_ if c not in real.frame.columns]

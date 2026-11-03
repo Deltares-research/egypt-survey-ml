@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -256,6 +257,14 @@ def assign_command_units(pool, seed, distribution_df):
 
 
 # ---------------------------------------------------------------- feature selection
+class FeatureSelectionWarning(UserWarning):
+    """A requested feature column cannot be used and is ignored."""
+
+
+class GovernorateWarning(UserWarning):
+    """A requested governorate is not in the data and is skipped."""
+
+
 @dataclass
 class FeatureSpec:
     base_cols: list
@@ -263,14 +272,38 @@ class FeatureSpec:
     male_extra: list
     female_extra: list
     extra_features: list
+    male_exclude: list = field(default_factory=list)
+    female_exclude: list = field(default_factory=list)
 
     def columns_for(self, sex_code):
-        return self.base_cols + (
-            self.male_extra if sex_code == 1 else self.female_extra
+        male = sex_code == 1
+        excluded = self.male_exclude if male else self.female_exclude
+        cols = self.base_cols + (self.male_extra if male else self.female_extra)
+        return [c for c in dict.fromkeys(cols) if c not in excluded]
+
+
+def _usable_columns(requested, available, label):
+    """The requested columns that are in the data; warns about the others and drops them."""
+    missing = [c for c in requested if c not in available]
+    if missing:
+        warnings.warn(
+            f"{label}: columns not in the survey or command-area data are not "
+            f"included: {missing}",
+            FeatureSelectionWarning,
+            stacklevel=3,
         )
+    return [c for c in requested if c in available]
 
 
-def select_features(masking_df, agri_pool, config: DatasetConfig) -> FeatureSpec:
+def select_features(
+    masking_df, agri_pool, config: DatasetConfig, available=None
+) -> FeatureSpec:
+    """Feature columns per sex: the mask, the config toggles and the per-sex extras/excludes.
+
+    ``available`` (the columns of the loaded survey and command-area data) is used to drop
+    extra columns that do not exist, with a :class:`FeatureSelectionWarning`; without it
+    they are kept and skipped later when the model frame is built.
+    """
     base_cols = masking_df.loc[masking_df["correl"] == 1, "variable"].tolist()
     # hrswk/hrswksc are added separately below, so strip them here to avoid duplicates.
     base_cols = [
@@ -285,10 +318,32 @@ def select_features(masking_df, agri_pool, config: DatasetConfig) -> FeatureSpec
     base_cols = base_cols + [c for c in extra_features if c not in base_cols]
 
     hrs = ["hrswk", "hrswksc"] if config.include_hrswk else []
+    extras = {"male": config.male_extra_columns, "female": config.female_extra_columns}
+    if available is not None:
+        extras = {
+            sex: _usable_columns(cols, available, f"{sex}_extra_columns")
+            for sex, cols in extras.items()
+        }
+    male_extra = hrs + extras["male"]
+    female_extra = hrs + extras["female"]
 
+    for sex, extra, exclude in (
+        ("male", male_extra, config.male_exclude_columns),
+        ("female", female_extra, config.female_exclude_columns),
+    ):
+        not_selected = [c for c in exclude if c not in base_cols + extra]
+        if not_selected:
+            warnings.warn(
+                f"{sex}_exclude_columns: columns that are not selected for the "
+                f"{sex} model have nothing to exclude: {not_selected}",
+                FeatureSelectionWarning,
+                stacklevel=2,
+            )
+
+    selected = base_cols + extras["male"] + extras["female"]
     categorical_columns = masking_df[
         (masking_df["type"].isin(["binary", "categorical"]))
-        & (masking_df["variable"].isin(base_cols))
+        & (masking_df["variable"].isin(selected))
     ]["variable"].tolist()
     # rel, attsch, occ are nominal codes; the mask file lists their type as "-".
     categorical_columns = categorical_columns + [
@@ -297,6 +352,10 @@ def select_features(masking_df, agri_pool, config: DatasetConfig) -> FeatureSpec
 
     print(f"Base feature list: {len(base_cols)} columns")
     print(f"Categorical: {categorical_columns}")
+    for sex in ("male", "female"):
+        extra, exclude = extras[sex], getattr(config, f"{sex}_exclude_columns")
+        if extra or exclude:
+            print(f"{sex}: extra columns {extra}, excluded columns {exclude}")
     print(
         f"INCLUDE_EMPSTAB={config.include_empstab}  INCLUDE_HRSWK={config.include_hrswk}  "
         f"ZERO_HANDLING={config.zero_handling!r}"
@@ -304,9 +363,11 @@ def select_features(masking_df, agri_pool, config: DatasetConfig) -> FeatureSpec
     return FeatureSpec(
         base_cols=base_cols,
         categorical_columns=categorical_columns,
-        male_extra=list(hrs),
-        female_extra=list(hrs),
+        male_extra=male_extra,
+        female_extra=female_extra,
         extra_features=extra_features,
+        male_exclude=list(config.male_exclude_columns),
+        female_exclude=list(config.female_exclude_columns),
     )
 
 
@@ -442,6 +503,19 @@ class Dataset:
     def assign_command_units(self, pool, seed):
         return assign_command_units(pool, seed, self.distribution_df)
 
+    def feature_columns(self, sex, excel_df=None):
+        """Feature columns of the ``sex`` ("male"/"female") model that exist in the data."""
+        excel_df = self.excel_df if excel_df is None else excel_df
+        available = set(self.test_pool.columns) | (set(excel_df.columns) - {"area"})
+        return [
+            c for c in self.features.columns_for(SEX_CODES[sex]) if c in available
+        ]
+
+    def categorical_columns(self, sex, excel_df=None):
+        """Categorical columns among :meth:`feature_columns`."""
+        cols = set(self.feature_columns(sex, excel_df))
+        return [c for c in self.features.categorical_columns if c in cols]
+
     def build_feature_frame(
         self, pool_with_geo, sex_code, excel_df=None, extra_cols=(), extra_cats=()
     ):
@@ -490,30 +564,81 @@ class Dataset:
             else self.config.female_outlier_cap
         )
 
+    def _select_governorates(self, geo, governorates):
+        """Rows of ``geo`` in the given governorates.
+
+        Governorates that are not in the data are skipped with a warning; it is only an
+        error if no respondents are left.
+        """
+        names = [governorates] if isinstance(governorates, str) else list(governorates)
+        known = set(self.train_pool["NAME1_"].dropna()) | set(
+            self.test_pool["NAME1_"].dropna()
+        )
+        absent = [g for g in names if g not in known]
+        if absent:
+            warnings.warn(
+                f"governorates not in the data are skipped: {absent}; "
+                f"available: {sorted(known)}",
+                GovernorateWarning,
+                stacklevel=3,
+            )
+        geo = geo[geo["NAME1_"].isin([g for g in names if g in known])]
+        if geo.empty:
+            raise ValueError(
+                f"no respondents in governorates {names}; available: {sorted(known)}"
+            )
+        return geo
+
     def realization(
-        self, sex, seed, excel_df=None, columns=(), categorical=(), test_data=True
+        self,
+        sex,
+        seed,
+        excel_df=None,
+        columns=(),
+        categorical=(),
+        test_data=True,
+        zero_handling=None,
+        governorates=None,
     ) -> Realization:
         """Test set of ``sex`` ("male"/"female") for the command-unit draw given by ``seed``.
 
         ``excel_df`` swaps in other command-area covariates (e.g. another RIBASIM run).
         ``columns`` / ``categorical`` add the features a saved model needs on top of the
         feature mask (see :func:`egypt_survey_ml.predict.model_columns`).
+        ``zero_handling`` overrides ``config.zero_handling``; the participation classifier
+        needs ``"none"`` because it is fitted on the zero-wage rows that the other modes remove.
+        ``governorates`` (names in the ``NAME1_`` column; default ``None`` = all) keeps only the
+        respondents of those governorates. The filter is applied after the command units are
+        drawn, so they are the same as in the unfiltered realization of this ``seed``.
         """
+        mode = self.config.zero_handling if zero_handling is None else zero_handling
         sex_code = SEX_CODES[sex]
         geo = self.assign_command_units(
             self.test_pool if test_data else self.train_pool, seed
         )
+        if governorates is not None:
+            geo = self._select_governorates(geo, governorates)
         frame, _, extra = self.build_feature_frame(
             geo, sex_code, excel_df, columns, categorical
         )
         keep = (frame["totwag_all"] < self.outlier_cap(sex)).to_numpy()
-        if self.config.zero_handling != "none":
+        if mode == "none":
+            frame = frame[keep]
+        else:
             keep = (
                 (frame["totwag_all"] < self.outlier_cap(sex))
                 & (frame["totwag_all"] > 0)
             ).to_numpy()
+            feature_cols = [
+                c
+                for c in dict.fromkeys(self.feature_columns(sex, excel_df) + list(columns))
+                if c in frame.columns
+            ]
+            cat_cols = list(
+                dict.fromkeys(self.categorical_columns(sex, excel_df) + list(categorical))
+            )
             frame = self.apply_zero_handling(
-                frame, categorical, columns, mode=self.config.zero_handling, seed=seed
+                frame, cat_cols, feature_cols, mode=mode, seed=seed
             )
             frame = frame[frame["totwag_all"] < self.outlier_cap(sex)]
         return Realization(
@@ -569,10 +694,11 @@ def prepare_dataset(
     """Run the full dataset pipeline for the given scenario settings.
 
     ``mask_path`` overrides only the column-selection workbook (default:
-    ``Result/correlation.xlsx``), not the command-area data workbook. Its ``Sheet1`` must
-    contain ``variable``, ``correl`` (1 selects a feature) and ``type`` (``binary`` /
-    ``categorical`` mark categorical features). Selected columns that exist in neither the
-    survey nor the command-area data are skipped, as in the training notebooks.
+    ``Result/correlation.xlsx``), not the command-area data workbook. Its ``variable`` sheet
+    must contain ``variable``, ``correl`` (1 selects a feature) and ``type`` (``binary`` /
+    ``categorical`` mark categorical features). Mask columns that exist in neither the
+    survey nor the command-area data are skipped, as in the training notebooks. Per-sex
+    extra/excluded columns come from ``config`` (see :class:`DatasetConfig`).
     """
     config = config or DatasetConfig()
     paths = paths or resolve_data_paths(config.data_filename)
@@ -585,8 +711,8 @@ def prepare_dataset(
     missing = {"variable", "correl", "type"} - set(masking_df.columns)
     if missing:
         raise ValueError(
-            f"Feature mask {paths.mask_xlsx} (Sheet1) is missing required columns: "
-            f"{sorted(missing)}"
+            f"Feature mask {paths.mask_xlsx} (sheet 'variable') is missing required "
+            f"columns: {sorted(missing)}"
         )
 
     df, hh = load_survey(paths)
@@ -611,7 +737,12 @@ def prepare_dataset(
         f"(already scaled -- no rural-population normalization needed for this sheet)"
     )
 
-    features = select_features(masking_df, agri_pool, config)
+    features = select_features(
+        masking_df,
+        agri_pool,
+        config,
+        available=set(train_pool.columns) | set(excel_df.columns),
+    )
     unavailable = [
         c
         for c in features.base_cols

@@ -222,9 +222,14 @@ ERF_Data/Data/
 ERF_Data/Data_Cleaning/*.csv
 notebooks/*.csv
 notebooks/*.png
+notebooks-copy/*.csv
+notebooks-copy/*.png
 
 # Catboost
 notebooks/catboost_info/
+notebooks-copy/catboost_info/
+
+Models/hp-tuned/*
 
 .python-version
 .vscode/

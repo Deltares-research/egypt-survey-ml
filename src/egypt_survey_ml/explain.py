@@ -84,7 +84,11 @@ class CombinedShap:
 
 
 def combined_shap(
-    dataset, members: Sequence[EnsembleMember], sex, excel_df=None
+    dataset,
+    members: Sequence[EnsembleMember],
+    sex,
+    excel_df=None,
+    governorates=None,
 ) -> CombinedShap:
     """Attribution of the combined model, averaged over all ensemble members.
 
@@ -93,6 +97,8 @@ def combined_shap(
     change the command-area covariates, the attribution and the value of those features
     are averaged over draws. ``features`` holds the (draw-averaged) numeric feature values
     for colouring plots; categorical features are NaN there.
+    ``governorates`` (names in the ``NAME1_`` column; default ``None`` = all) restricts the
+    respondents to those governorates, as in ``predict_ensemble``.
     """
     members = list(members)
     if not members:
@@ -104,7 +110,13 @@ def combined_shap(
         reg = _as_model(member.regressor, CatBoostRegressor)
         columns, categorical = model_columns(clf, reg)
         real = dataset.realization(
-            sex, member.seed, excel_df=excel_df, columns=columns, categorical=categorical
+            sex,
+            member.seed,
+            excel_df=excel_df,
+            columns=columns,
+            categorical=categorical,
+            zero_handling="none",
+            governorates=governorates,
         )
         shap_cls, base_cls = catboost_shap(clf, real.frame)
         shap_reg, base_reg = catboost_shap(reg, real.frame)

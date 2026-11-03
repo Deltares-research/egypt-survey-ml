@@ -72,8 +72,10 @@ def tiny_setup():
 class FakeDataset:
     def __init__(self, frame):
         self.frame = frame
+        self.requests = []
 
     def realization(self, sex, seed, excel_df=None, **kwargs):
+        self.requests.append(kwargs)
         units = np.array(["A", "B"] * (len(self.frame) // 2))
         return Realization(seed, 2, self.frame, np.ones(len(self.frame)), units)
 
@@ -131,6 +133,18 @@ def test_catboost_shap_is_additive(tiny_setup):
     values, base = catboost_shap(clf, frame)
     raw = clf.predict(frame[clf.feature_names_], prediction_type="RawFormulaVal")
     np.testing.assert_allclose(values.sum(axis=1) + base, raw, atol=1e-9)
+
+
+def test_combined_shap_passes_governorates_and_the_full_population_to_the_realization(
+    tiny_setup,
+):
+    frame, clf, reg = tiny_setup
+    ds = FakeDataset(frame)
+    member = EnsembleMember(1, clf, reg)
+    combined_shap(ds, [member], "female")
+    combined_shap(ds, [member], "female", governorates=["Cairo"])
+    assert [r["governorates"] for r in ds.requests] == [None, ["Cairo"]]
+    assert all(r["zero_handling"] == "none" for r in ds.requests)
 
 
 def test_combined_shap_requires_members(tiny_setup):

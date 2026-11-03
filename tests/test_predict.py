@@ -166,9 +166,22 @@ class FakeDataset:
     def __init__(self, wages=(100.0, 0.0, 300.0)):
         self.wages = np.array(wages)
         self.calls = []
+        self.zero_handling_requests = []
+        self.governorate_requests = []
 
-    def realization(self, sex, seed, excel_df=None, columns=(), categorical=()):
+    def realization(
+        self,
+        sex,
+        seed,
+        excel_df=None,
+        columns=(),
+        categorical=(),
+        zero_handling=None,
+        governorates=None,
+    ):
         self.calls.append((sex, seed, excel_df))
+        self.governorate_requests.append(governorates)
+        self.zero_handling_requests.append(zero_handling)
         self.requested = (list(columns), list(categorical))
         frame = pd.DataFrame(
             {
@@ -218,12 +231,22 @@ def test_predict_ensemble_requires_members():
         predict_ensemble(FakeDataset(), [], "female")
 
 
+def test_predict_ensemble_passes_governorates_to_the_realization():
+    ds = FakeDataset()
+    member = EnsembleMember(42, FakeClassifier(0.1), FakeRegressor())
+    predict_ensemble(ds, [member], "female")
+    predict_ensemble(ds, [member], "female", governorates=["Cairo", "Giza"])
+    assert ds.governorate_requests == [None, ["Cairo", "Giza"]]
+
+
 def test_predict_ensemble_requests_the_columns_its_models_need():
     ds = FakeDataset()
     predict_ensemble(
         ds, [EnsembleMember(42, FakeClassifier(0.1), FakeRegressor())], "female"
     )
     assert ds.requested == (["x", "y"], [])
+    # evaluation is on everyone, paid and unpaid, whatever the training zero handling
+    assert ds.zero_handling_requests == ["none"]
 
 
 @pytest.mark.parametrize("model_kind", ["classifier", "regressor"])
