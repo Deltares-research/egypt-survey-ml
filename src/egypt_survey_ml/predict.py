@@ -51,7 +51,7 @@ class EnsembleMember:
 
 
 def load_members(
-    classifier_dir, regressor_dir, sex, load=False
+    classifier_dir, regressor_dir, sex, load=False, seeds=None
 ) -> list[EnsembleMember]:
     """Build the members for ``sex`` from the ``model_metrics.csv`` files of both model folders.
 
@@ -65,6 +65,10 @@ def load_members(
     reg_df = pd.read_csv(regressor_dir / "model_metrics.csv")
     if sorted(cls_df["rep"]) != sorted(reg_df["rep"]):
         raise ValueError("classifier and regressor metrics list different reps")
+
+    if seeds is not None:
+        cls_df = cls_df[cls_df["seed"].isin(seeds)]
+        reg_df = reg_df[reg_df["seed"].isin(seeds)]
 
     merged = cls_df[["rep", "seed", "model_file"]].merge(
         reg_df[["rep", "seed", f"{sex}_model_file"]],
@@ -168,7 +172,9 @@ class EnsemblePrediction:
         Requires ``predict_ensemble(..., keep_inputs=True)``.
         """
         if self.inputs is None:
-            raise ValueError("no input data stored; use predict_ensemble(..., keep_inputs=True)")
+            raise ValueError(
+                "no input data stored; use predict_ensemble(..., keep_inputs=True)"
+            )
         out = self.inputs.copy()
         out["cls_prob"] = self.cls_prob.ravel()
         out["reg_pred"] = self.reg_pred.ravel()
@@ -270,7 +276,11 @@ def predict_ensemble(
         reg = _as_model(member.regressor, CatBoostRegressor)
         columns, categorical = model_columns(clf, reg)
         real = dataset.realization(
-            sex, member.seed, excel_df=excel_df, columns=columns, categorical=categorical
+            sex,
+            member.seed,
+            excel_df=excel_df,
+            columns=columns,
+            categorical=categorical,
         )
         for label, model in (("classifier", clf), ("regressor", reg)):
             missing = [c for c in model.feature_names_ if c not in real.frame.columns]

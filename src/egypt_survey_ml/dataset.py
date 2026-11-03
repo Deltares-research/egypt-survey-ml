@@ -87,9 +87,9 @@ def build_household_context(df, hh) -> HouseholdContext:
             hh_wage[f"sp_{n}_hrswk"],
             avg_hours_by_ind,
         )
-    hh_wage["wagehd"] = hh_wage[
-        ["empinchd", "sempinchd", "totwaghd", "irrwagehd"]
-    ].sum(axis=1, skipna=True)
+    hh_wage["wagehd"] = hh_wage[["empinchd", "sempinchd", "totwaghd", "irrwagehd"]].sum(
+        axis=1, skipna=True
+    )
     sp_cols = [
         f"{p}sp_{n}"
         for n in [1, 2, 3]
@@ -101,7 +101,9 @@ def build_household_context(df, hh) -> HouseholdContext:
         hh_wage["wagesp"] / hh_wage["household_wage_total"]
     ).fillna(0.5)
     print(
-        "household_wage_total / wage_ratio computed for", len(hh_wage), "rural households"
+        "household_wage_total / wage_ratio computed for",
+        len(hh_wage),
+        "rural households",
     )
     return HouseholdContext(
         household_size, n_employed_in_hh, head_info, avg_hours_by_ind, hh_wage
@@ -135,15 +137,18 @@ def select_rural_agriculture(df, min_working_age):
 def split_train_test(agri_pool, seed, test_size=0.2):
     """Sex-stratified train/test split. Returns (train_pool, test_pool, test_ids)."""
     _, test_idx = train_test_split(
-        agri_pool.index, test_size=test_size, random_state=seed, stratify=agri_pool["sex"]
+        agri_pool.index,
+        test_size=test_size,
+        random_state=seed,
+        stratify=agri_pool["sex"],
     )
     test_ids = set(test_idx)
     test_pool = agri_pool.loc[list(test_ids)].copy()
     train_pool = agri_pool.loc[~agri_pool.index.isin(test_ids)].copy()
 
-    assert test_ids.isdisjoint(set(train_pool.index)), (
-        "test/train overlap -- must never happen"
-    )
+    assert test_ids.isdisjoint(
+        set(train_pool.index)
+    ), "test/train overlap -- must never happen"
     print(
         f"\nTEST (rural + agriculture): {len(test_pool)} rows {_sex_counts(test_pool)}"
     )
@@ -260,13 +265,17 @@ class FeatureSpec:
     extra_features: list
 
     def columns_for(self, sex_code):
-        return self.base_cols + (self.male_extra if sex_code == 1 else self.female_extra)
+        return self.base_cols + (
+            self.male_extra if sex_code == 1 else self.female_extra
+        )
 
 
 def select_features(masking_df, agri_pool, config: DatasetConfig) -> FeatureSpec:
     base_cols = masking_df.loc[masking_df["correl"] == 1, "variable"].tolist()
     # hrswk/hrswksc are added separately below, so strip them here to avoid duplicates.
-    base_cols = [c for c in base_cols if c not in ("emps", "hrswk", "hrswksc", "totwag")]
+    base_cols = [
+        c for c in base_cols if c not in ("emps", "hrswk", "hrswksc", "totwag")
+    ]
     if not config.include_empstab:
         base_cols = [c for c in base_cols if c != "empstab"]
 
@@ -299,46 +308,6 @@ def select_features(masking_df, agri_pool, config: DatasetConfig) -> FeatureSpec
         female_extra=list(hrs),
         extra_features=extra_features,
     )
-
-
-def build_feature_frame(
-    pool_with_geo,
-    sex_code,
-    excel_df,
-    features: FeatureSpec,
-    extra_cols=(),
-    extra_cats=(),
-):
-    """Per-sex model frame. Returns (frame, categorical columns, extra_info with pweight/command_unit).
-
-    Columns of the mask-based ``features`` that are not in the survey or command-area data
-    are skipped. ``extra_cols`` / ``extra_cats`` add columns (e.g. those a saved model
-    was trained on) on top of the mask selection; ``extra_cats`` are cast to str.
-    """
-    cols = list(dict.fromkeys(features.columns_for(sex_code) + list(extra_cols)))
-    frame = (
-        pool_with_geo[pool_with_geo["sex"] == sex_code]
-        .merge(excel_df, left_on="command_unit", right_on="area", how="inner")
-        .drop(columns=["area"])  # duplicate of command_unit
-    )
-    keep = [c for c in cols if c in frame.columns] + [
-        "log1p_wage",
-        "totwag_all",
-        "is_paid",
-        "command_unit",
-    ]
-    frame = frame.dropna(subset=["log1p_wage"])
-    extra_info = frame[["pweight", "command_unit"]]
-    frame = frame[keep]
-    cats = [
-        c
-        for c in dict.fromkeys(list(features.categorical_columns) + list(extra_cats))
-        if c in frame.columns
-    ]
-    # With pandas 3 .astype(str) keeps NaN as a missing value, but CatBoost's cat_features
-    # cannot contain NaN, so fill explicitly first.
-    frame[cats] = frame[cats].fillna("missing").astype(str)
-    return frame, cats, extra_info
 
 
 # -------------------------------------------------------------- zero-wage handling
@@ -433,29 +402,6 @@ def lognormal_synthetic_augment(
     return pd.concat([frame, synth_df], ignore_index=True)
 
 
-def apply_zero_handling(
-    frame,
-    cat_cols,
-    feature_cols,
-    mode,
-    seed,
-    geo_cols=None,
-    drop_random_frac=1.0,
-):
-    if mode == "none":
-        return frame
-    if mode == "drop_random":
-        return drop_random_zeros(frame, drop_random_frac, seed)
-    if mode == "lognormal_synthetic":
-        n_zero = (frame["is_paid"] == 0).sum()
-        n_pos = (frame["is_paid"] == 1).sum()
-        n_synthetic = max(0, n_zero - n_pos)  # toward parity, not necessarily exact 50/50
-        return lognormal_synthetic_augment(
-            frame, feature_cols, cat_cols, n_synthetic, geo_cols, seed=seed
-        )
-    raise ValueError(mode)
-
-
 # ------------------------------------------------------------------------ pipeline
 @dataclass
 class Realization:
@@ -499,14 +445,43 @@ class Dataset:
     def build_feature_frame(
         self, pool_with_geo, sex_code, excel_df=None, extra_cols=(), extra_cats=()
     ):
-        return build_feature_frame(
-            pool_with_geo,
-            sex_code,
-            self.excel_df if excel_df is None else excel_df,
-            self.features,
-            extra_cols,
-            extra_cats,
+        """Per-sex model frame. Returns (frame, categorical columns, extra_info with pweight/command_unit).
+
+        Columns of the mask-based ``features`` that are not in the survey or command-area data
+        are skipped. ``extra_cols`` / ``extra_cats`` add columns (e.g. those a saved model
+        was trained on) on top of the mask selection; ``extra_cats`` are cast to str.
+        """
+        if excel_df is None:
+            excel_df = self.excel_df
+
+        cols = list(
+            dict.fromkeys(self.features.columns_for(sex_code) + list(extra_cols))
         )
+        frame = (
+            pool_with_geo[pool_with_geo["sex"] == sex_code]
+            .merge(excel_df, left_on="command_unit", right_on="area", how="inner")
+            .drop(columns=["area"])  # duplicate of command_unit
+        )
+        keep = [c for c in cols if c in frame.columns] + [
+            "log1p_wage",
+            "totwag_all",
+            "is_paid",
+            "command_unit",
+        ]
+        frame = frame.dropna(subset=["log1p_wage"])
+        extra_info = frame[["pweight", "command_unit"]]
+        frame = frame[keep]
+        cats = [
+            c
+            for c in dict.fromkeys(
+                list(self.features.categorical_columns) + list(extra_cats)
+            )
+            if c in frame.columns
+        ]
+        # With pandas 3 .astype(str) keeps NaN as a missing value, but CatBoost's cat_features
+        # cannot contain NaN, so fill explicitly first.
+        frame[cats] = frame[cats].fillna("missing").astype(str)
+        return frame, cats, extra_info
 
     def outlier_cap(self, sex):
         return (
@@ -516,7 +491,7 @@ class Dataset:
         )
 
     def realization(
-        self, sex, seed, excel_df=None, columns=(), categorical=()
+        self, sex, seed, excel_df=None, columns=(), categorical=(), test_data=True
     ) -> Realization:
         """Test set of ``sex`` ("male"/"female") for the command-unit draw given by ``seed``.
 
@@ -525,29 +500,49 @@ class Dataset:
         feature mask (see :func:`egypt_survey_ml.predict.model_columns`).
         """
         sex_code = SEX_CODES[sex]
-        geo = self.assign_command_units(self.test_pool, seed)
+        geo = self.assign_command_units(
+            self.test_pool if test_data else self.train_pool, seed
+        )
         frame, _, extra = self.build_feature_frame(
             geo, sex_code, excel_df, columns, categorical
         )
         keep = (frame["totwag_all"] < self.outlier_cap(sex)).to_numpy()
+        if self.config.zero_handling != "none":
+            keep = (
+                (frame["totwag_all"] < self.outlier_cap(sex))
+                & (frame["totwag_all"] > 0)
+            ).to_numpy()
+            frame = self.apply_zero_handling(
+                frame, categorical, columns, mode=self.config.zero_handling, seed=seed
+            )
+            frame = frame[frame["totwag_all"] < self.outlier_cap(sex)]
         return Realization(
             seed=seed,
             sex_code=sex_code,
-            frame=frame[keep],
+            frame=frame,
             weight=extra["pweight"].to_numpy()[keep],
             command_unit=extra["command_unit"].to_numpy()[keep],
         )
 
     def apply_zero_handling(self, frame, cat_cols, feature_cols, mode=None, seed=None):
-        return apply_zero_handling(
-            frame,
-            cat_cols,
-            feature_cols,
-            self.config.zero_handling if mode is None else mode,
-            self.config.rng_seed if seed is None else seed,
-            geo_cols=self.geo_cols,
-            drop_random_frac=self.config.drop_random_frac,
-        )
+        if mode is None:
+            mode = self.config.zero_handling
+        if seed is None:
+            seed = self.config.rng_seed
+        if mode == "none":
+            return frame
+        if mode == "drop_random":
+            return drop_random_zeros(frame, self.config.drop_random_frac, seed)
+        if mode == "lognormal_synthetic":
+            n_zero = (frame["is_paid"] == 0).sum()
+            n_pos = (frame["is_paid"] == 1).sum()
+            n_synthetic = max(
+                0, n_zero - n_pos
+            )  # toward parity, not necessarily exact 50/50
+            return lognormal_synthetic_augment(
+                frame, feature_cols, cat_cols, n_synthetic, self.geo_cols, seed=seed
+            )
+        raise ValueError(mode)
 
     def perturbate_wage(self, frame, seed, mu=0.0, sigma=None):
         return perturbate_wage(
@@ -586,7 +581,7 @@ def prepare_dataset(
     print(f"data source: {paths.source}")
     paths.report()
 
-    masking_df = pd.read_excel(paths.mask_xlsx, sheet_name="Sheet1")
+    masking_df = pd.read_excel(paths.mask_xlsx, sheet_name="variable")
     missing = {"variable", "correl", "type"} - set(masking_df.columns)
     if missing:
         raise ValueError(
