@@ -27,6 +27,44 @@ class DataPaths:
     pop_density_csv: Path
     source: str
 
+    @classmethod
+    def from_onedrive(
+        cls,
+        *,
+        onedrive_dir: str | Path = _ONEDRIVE,
+        egypt_dir: str | Path = _EGYPT_DIR,
+        erf_dir: str | Path = _ERF_DIR,
+        lfs_dir: str | Path = _LFS_DIR,
+        data_filename: str = "data_correlation.xlsx",
+    ) -> DataPaths:
+        """Build paths from the Deltares OneDrive directory layout."""
+        onedrive = Path(onedrive_dir).expanduser()
+        if not onedrive.is_absolute():
+            onedrive = Path.home() / onedrive
+
+        egypt_root = onedrive / egypt_dir
+        erf_root = onedrive / erf_dir
+        if not (egypt_root.exists() and erf_root.exists()):
+            raise FileNotFoundError("Could not find required OneDrive folders.")
+
+        data_root = egypt_root / "04_Data/2026_data"
+        crosswalk_dir = data_root.parent / "cleaned_data/crosswalk"
+        result_dir = data_root.parent / "Result"
+        return cls(
+            data_root=data_root,
+            excel_path=erf_root / data_filename,
+            crosswalk_csv=crosswalk_dir / "reg_governorate_crosswalk.csv",
+            command_area_crosswalk_csv=(
+                crosswalk_dir / "command_area_governorate_crosswalk.csv"
+            ),
+            lfs_dta=data_root / lfs_dir / "Egypt 2022-LFS IND-V1.dta",
+            hh_dta=data_root / lfs_dir / "Egypt 2022-LFS HH-V1.dta",
+            result_dir=result_dir,
+            mask_xlsx=result_dir / "correlation.xlsx",
+            pop_density_csv=result_dir / "population_density_matrix.csv",
+            source=f"OneDrive ({data_root})",
+        )
+
     def report(self) -> None:
         """Print which input files exist."""
         for p in [
@@ -57,16 +95,7 @@ def resolve_data_paths(
         result_dir = data_root.parent / "Result"
         source = f"local ({data_root})"
     else:
-        onedrive = Path("~").expanduser() / _ONEDRIVE
-        egypt_root = onedrive / _EGYPT_DIR
-        erf_root = onedrive / _ERF_DIR
-        if not (egypt_root.exists() and erf_root.exists()):
-            raise FileNotFoundError("Could not find required OneDrive folders.")
-        data_root = egypt_root / "04_Data/2026_data"
-        excel_path = erf_root / data_filename
-        crosswalk_dir = data_root.parent / "cleaned_data/crosswalk"
-        result_dir = data_root.parent / "Result"
-        source = f"OneDrive ({data_root})"
+        return DataPaths.from_onedrive(data_filename=data_filename)
 
     return DataPaths(
         data_root=data_root,
