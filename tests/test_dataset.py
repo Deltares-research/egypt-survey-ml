@@ -253,6 +253,47 @@ def test_feature_frame_adds_columns_requested_by_models():
     assert "occ" in cats and frame["occ"].tolist() == ["2"]
 
 
+@pytest.mark.parametrize("selection", ["mask", "model"])
+def test_feature_frame_does_not_duplicate_selected_metadata_columns(selection):
+    ds, pool = _dataset()
+    metadata = ["log1p_wage", "totwag_all", "is_paid", "command_unit"]
+    kwargs = {}
+    if selection == "mask":
+        mask = pd.concat(
+            [
+                MASK,
+                pd.DataFrame(
+                    {
+                        "variable": metadata,
+                        "correl": [1] * len(metadata),
+                        "type": ["numerical", "numerical", "binary", "categorical"],
+                    }
+                ),
+            ],
+            ignore_index=True,
+        )
+        ds.features = select_features(mask, pool, DatasetConfig(include_hrswk=False))
+    else:
+        kwargs = {"extra_cols": metadata, "extra_cats": ["is_paid", "command_unit"]}
+
+    frame, cats, extra = ds.build_feature_frame(pool, 1, **kwargs)
+
+    assert frame.columns.is_unique
+    expected = (
+        ["age", "sex", *metadata, "occ"]
+        if selection == "mask"
+        else ["age", "sex", "occ", *metadata]
+    )
+    assert frame.columns.tolist() == expected
+    assert {"is_paid", "command_unit"} <= set(cats)
+    assert frame["command_unit"].tolist() == ["A"]
+    assert frame["is_paid"].tolist() == ["1"]
+    assert frame["totwag_all"].tolist() == [10.0]
+    assert frame["log1p_wage"].tolist() == [1.0]
+    assert extra["command_unit"].tolist() == ["A"]
+    assert extra["pweight"].tolist() == [2.0]
+
+
 def _realization_dataset(zero_handling):
     pool = pd.DataFrame(
         {
@@ -389,5 +430,3 @@ def test_predict_ensemble_can_be_limited_to_governorates():
     pred = predict_ensemble(ds, [member], "male", governorates=["Cairo"])
     assert pred.expected_wage.shape == (1, 20)
     assert predict_ensemble(ds, [member], "male").expected_wage.shape == (1, 60)
-
-

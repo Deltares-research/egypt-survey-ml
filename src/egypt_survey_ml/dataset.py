@@ -524,6 +524,7 @@ class Dataset:
         Columns of the mask-based ``features`` that are not in the survey or command-area data
         are skipped. ``extra_cols`` / ``extra_cats`` add columns (e.g. those a saved model
         was trained on) on top of the mask selection; ``extra_cats`` are cast to str.
+        Targets and command-unit metadata are retained once, even when selected as features.
         """
         if excel_df is None:
             excel_df = self.excel_df
@@ -536,12 +537,12 @@ class Dataset:
             .merge(excel_df, left_on="command_unit", right_on="area", how="inner")
             .drop(columns=["area"])  # duplicate of command_unit
         )
-        keep = [c for c in cols if c in frame.columns] + [
-            "log1p_wage",
-            "totwag_all",
-            "is_paid",
-            "command_unit",
-        ]
+        keep = list(
+            dict.fromkeys(
+                [c for c in cols if c in frame.columns]
+                + ["log1p_wage", "totwag_all", "is_paid", "command_unit"]
+            )
+        )
         frame = frame.dropna(subset=["log1p_wage"])
         extra_info = frame[["pweight", "command_unit"]]
         frame = frame[keep]

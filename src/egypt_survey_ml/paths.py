@@ -33,7 +33,6 @@ class DataPaths:
         *,
         onedrive_dir: str | Path = _ONEDRIVE,
         egypt_dir: str | Path = _EGYPT_DIR,
-        erf_dir: str | Path = _ERF_DIR,
         lfs_dir: str | Path = _LFS_DIR,
         data_filename: str = "data_correlation.xlsx",
     ) -> DataPaths:
@@ -43,26 +42,25 @@ class DataPaths:
             onedrive = Path.home() / onedrive
 
         egypt_root = onedrive / egypt_dir
-        erf_root = onedrive / erf_dir
-        if not (egypt_root.exists() and erf_root.exists()):
+        if not egypt_root.exists():
             raise FileNotFoundError("Could not find required OneDrive folders.")
 
-        data_root = egypt_root / "04_Data/2026_data"
-        crosswalk_dir = data_root.parent / "cleaned_data/crosswalk"
-        result_dir = data_root.parent / "Result"
+        crosswalk_dir = egypt_root / "Data/crosswalk"
+        result_dir = egypt_root / "Result"
         return cls(
-            data_root=data_root,
-            excel_path=erf_root / data_filename,
+            data_root=egypt_root,
+            excel_path=egypt_root / data_filename,
             crosswalk_csv=crosswalk_dir / "reg_governorate_crosswalk.csv",
             command_area_crosswalk_csv=(
                 crosswalk_dir / "command_area_governorate_crosswalk.csv"
             ),
-            lfs_dta=data_root / lfs_dir / "Egypt 2022-LFS IND-V1.dta",
-            hh_dta=data_root / lfs_dir / "Egypt 2022-LFS HH-V1.dta",
+            lfs_dta=egypt_root / lfs_dir / "Egypt 2022-LFS IND-V1.dta",
+            hh_dta=egypt_root / lfs_dir / "Egypt 2022-LFS HH-V1.dta",
             result_dir=result_dir,
             mask_xlsx=result_dir / "correlation.xlsx",
-            pop_density_csv=result_dir / "population_density_matrix.csv",
-            source=f"OneDrive ({data_root})",
+            pop_density_csv=egypt_root
+            / "Data/other_data/population_density_matrix.csv",
+            source=f"OneDrive ({egypt_root})",
         )
 
     def report(self) -> None:
