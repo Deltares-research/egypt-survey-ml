@@ -157,10 +157,16 @@ class EnsemblePrediction:
 
     @property
     def expected_wage(self):
-        """P(paid) * predicted wage, per member."""
+        """P(paid) * predicted wage, per member.
         new_wage = self.reg_pred
         new_wage = np.where(self.cls_prob < 0.5, 0, new_wage)
-        return self.cls_prob * self.reg_pred
+        return self.cls_prob * self.reg_pred"""
+        """Expected wage, with a 0.5 probability cutoff for females."""
+        wage = self.cls_prob * self.reg_pred
+        if self.sex == "female":
+            wage = np.where(self.cls_prob < 0.33, 0, wage)
+        return wage
+    
 
     def to_frame(self) -> pd.DataFrame:
         """Long dataframe with the input data and predictions of every member.

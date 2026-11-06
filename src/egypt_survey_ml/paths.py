@@ -9,8 +9,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _ONEDRIVE = "OneDrive - Stichting Deltares"
-_EGYPT_DIR = "Tiaravanni Hermawan's files - Egypt"
-_ERF_DIR = "Tiaravanni Hermawan's files - Egypt_ERF_data"
+_EGYPT_DIR = "Egypt_ERF_data"
+_ERF_DIR = "Egypt_ERF_data"
 _LFS_DIR = "Labor Force Survey, LFS 2022 - Egypt, Arab Rep., 2022"
 
 
