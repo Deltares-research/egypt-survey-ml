@@ -164,7 +164,8 @@ class EnsemblePrediction:
         """Expected wage, with a 0.5 probability cutoff for females."""
         wage = self.cls_prob * self.reg_pred
         if self.sex == "female":
-            wage = np.where(self.cls_prob < 0.33, 0, wage)
+            wage = self.cls_prob * self.reg_pred
+            #wage = np.where(self.cls_prob < 0.33, 0, wage)
         return wage
     
 
