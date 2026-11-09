@@ -160,7 +160,7 @@ KINDS = {
         # source of systematic under-prediction in train-catboost_v2_rural.ipynb.
         target="totwag_all",
         model_cls=CatBoostRegressor,
-        model_params={"loss_function": "RMSE", "monotone_constraints": {"salinity_production_Wheat": 1, "producer_price": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1, "salinity_production_Sugar cane": 1}},#, "monotone_constraints": {"producer_price": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1,"salinity_production_Sugar cane": 1, "salinity_production_Wheat": 1, "salinity_production_Alfalfa for forage": 1, "salinity_production_Sugar beet": 1,"salinity_production_Rice, paddy": 1}},
+        model_params={"loss_function": "RMSE", "monotone_constraints": {}},# "salinity_production_Sugar cane": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1}"salinity_production_Cotton linters": 1,#, "salinity_production_Maize (incl. 0067 and 0068)": 1,"monotone_constraints": {"producer_price": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1,"salinity_production_Sugar cane": 1, "salinity_production_Wheat": 1, "salinity_production_Alfalfa for forage": 1, "salinity_production_Sugar beet": 1,"salinity_production_Rice, paddy": 1}},
         # a wage can't be negative; CatBoost's raw output can be
         predict=lambda model, X: np.clip(model.predict(X), 0, None),
         evaluate=lambda frame, pred, label: evaluate(
@@ -178,7 +178,7 @@ KINDS = {
         name="classifier",
         target="is_paid",
         model_cls=CatBoostClassifier,
-        model_params={"monotone_constraints": {"producer_price": 1, "salinity_production_Wheat": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1, "salinity_production_Sugar cane": 1}},#,{"monotone_constraints": {"producer_price": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1,"salinity_production_Sugar cane": 1, "salinity_production_Wheat": 1, "salinity_production_Alfalfa for forage": 1, "salinity_production_Sugar beet": 1,"salinity_production_Rice, paddy": 1}},
+        model_params={"monotone_constraints": {}},# "salinity_production_Sugar cane": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1"salinity_production_Cotton linters": 1}},#,{"monotone_constraints": {"producer_price": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1,"salinity_production_Sugar cane": 1, "salinity_production_Wheat": 1, "salinity_production_Alfalfa for forage": 1, "salinity_production_Sugar beet": 1,"salinity_production_Rice, paddy": 1}},
         predict=lambda model, X: model.predict(X),
         evaluate=lambda frame, pred, label: evaluate_participation(
             frame["is_paid"].to_numpy(), pred, label=label
