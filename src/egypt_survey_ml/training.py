@@ -127,7 +127,9 @@ class _Kind:
     headline: str  # metric reported while training and saved in model_metrics.csv
     summary_cols: list  # metrics summarised at the end of a run
     hp_keys: tuple  # hyperparameter tables used by this kind
-    record: Callable  # (rep, seed, {sex: (metrics, model path)}) -> model_metrics.csv row
+    record: (
+        Callable  # (rep, seed, {sex: (metrics, model path)}) -> model_metrics.csv row
+    )
     # zero-wage handling of the model frames; None follows ``DatasetConfig.zero_handling``
     zero_handling: str | None = None
 
@@ -152,17 +154,11 @@ def _classifier_record(rep, seed, per_sex):
         "model_file": str(per_sex["female"][1]),
     }
 
-'''
-constraints = {
-    "salinity_production_Lemons and limes": 1,
-    "salinity_production_Tomatoes, fresh": 1,
-    "salinity_production_Cotton linters": 1,
-    "salinity_production_Sugar cane": 1,
-    "salinity_production_Sugar beet": 1,
-}
-'''
 
-constraints = {"salinity_production_Sugar cane": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1}
+constraints = {
+    "salinity_production_Sugar cane": 1,
+    "salinity_production_Maize (incl. 0067 and 0068)": 1,
+}
 
 KINDS = {
     "regressor": _Kind(
@@ -171,7 +167,7 @@ KINDS = {
         # source of systematic under-prediction in train-catboost_v2_rural.ipynb.
         target="totwag_all",
         model_cls=CatBoostRegressor,
-        model_params={"loss_function": "RMSE", "monotone_constraints": constraints},# "salinity_production_Sugar cane": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1}"salinity_production_Cotton linters": 1,#, "salinity_production_Maize (incl. 0067 and 0068)": 1,"monotone_constraints": {"producer_price": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1,"salinity_production_Sugar cane": 1, "salinity_production_Wheat": 1, "salinity_production_Alfalfa for forage": 1, "salinity_production_Sugar beet": 1,"salinity_production_Rice, paddy": 1}},
+        model_params={"loss_function": "RMSE", "monotone_constraints": constraints},
         # a wage can't be negative; CatBoost's raw output can be
         predict=lambda model, X: np.clip(model.predict(X), 0, None),
         evaluate=lambda frame, pred, label: evaluate(
@@ -189,7 +185,7 @@ KINDS = {
         name="classifier",
         target="is_paid",
         model_cls=CatBoostClassifier,
-        model_params={"monotone_constraints": constraints},# "salinity_production_Sugar cane": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1"salinity_production_Cotton linters": 1}},#,{"monotone_constraints": {"producer_price": 1, "salinity_production_Maize (incl. 0067 and 0068)": 1,"salinity_production_Sugar cane": 1, "salinity_production_Wheat": 1, "salinity_production_Alfalfa for forage": 1, "salinity_production_Sugar beet": 1,"salinity_production_Rice, paddy": 1}},
+        model_params={"monotone_constraints": constraints},
         predict=lambda model, X: model.predict(X),
         evaluate=lambda frame, pred, label: evaluate_participation(
             frame["is_paid"].to_numpy(), pred, label=label
@@ -380,7 +376,9 @@ class ModelTrainer:
         random_seed=42,
     ):
         if sex_label not in (None, *SEXES):
-            raise ValueError(f"sex_label must be None, 'male' or 'female', got {sex_label!r}")
+            raise ValueError(
+                f"sex_label must be None, 'male' or 'female', got {sex_label!r}"
+            )
         ds = self.ds if ds is None else ds
         store = self._stores[kind.name]
 
@@ -422,7 +420,10 @@ class ModelTrainer:
 
         gap = (
             gender_gap(
-                preds["male"][0], preds["female"][0], preds["male"][1], preds["female"][1]
+                preds["male"][0],
+                preds["female"][0],
+                preds["male"][1],
+                preds["female"][1],
             )
             if sex_label is None
             else {}
@@ -544,7 +545,9 @@ class ModelTrainer:
                 f"{provided}; using default hyperparameters for {not_provided}"
             )
 
-        valid = {k: self.hp_parameters[k] for k in keys if self.hp_parameters[k] is not None}
+        valid = {
+            k: self.hp_parameters[k] for k in keys if self.hp_parameters[k] is not None
+        }
         if not valid:
             return
         absent_everywhere = [
@@ -588,10 +591,14 @@ class ModelTrainer:
 
         n_reps = len(seeds)
         print_every = max(1, n_reps // 20)  # ~20 status lines, regardless of n_reps
-        print(f"[{kind.name}s] hyperparameters: {self._describe_hyperparameters(kind, seeds, lr, depth)}")
+        print(
+            f"[{kind.name}s] hyperparameters: {self._describe_hyperparameters(kind, seeds, lr, depth)}"
+        )
         start_time = time.time()
         records, all_runs, gap_runs = [], [], []
-        fit_trees = {sex: [] for sex in SEXES}  # trees kept after early stopping / best model
+        fit_trees = {
+            sex: [] for sex in SEXES
+        }  # trees kept after early stopping / best model
         fit_seconds = []
 
         for rep, seed in enumerate(
@@ -649,7 +656,9 @@ class ModelTrainer:
 
         metrics_df = pd.DataFrame(records)
         metrics_df.to_csv(model_dir / "model_metrics.csv", index=False)
-        result = TrainingResult(metrics_df, pd.DataFrame(all_runs), pd.DataFrame(gap_runs))
+        result = TrainingResult(
+            metrics_df, pd.DataFrame(all_runs), pd.DataFrame(gap_runs)
+        )
         self._print_summary(kind, result, n_reps)
         return result
 
@@ -666,7 +675,11 @@ class ModelTrainer:
             )
             print()
         print("--- predicted vs. observed gender gap across repetitions ---")
-        print(result.gaps.describe(percentiles=[0.05, 0.5, 0.95]).loc[["5%", "50%", "95%"]])
+        print(
+            result.gaps.describe(percentiles=[0.05, 0.5, 0.95]).loc[
+                ["5%", "50%", "95%"]
+            ]
+        )
 
     def run_models(
         self,
@@ -694,7 +707,9 @@ class ModelTrainer:
         Returns a :class:`TrainingResult` per trained kind.
         """
         if kind is not None and kind not in KINDS:
-            raise ValueError(f"kind must be None, 'regressor' or 'classifier', got {kind!r}")
+            raise ValueError(
+                f"kind must be None, 'regressor' or 'classifier', got {kind!r}"
+            )
         kinds = list(KINDS.values()) if kind is None else [KINDS[kind]]
         ds = self.ds if ds is None else ds
         keys = [key for k in kinds for key in k.hp_keys]

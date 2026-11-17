@@ -100,6 +100,41 @@ def test_combined_shap_matches_ensemble_prediction(tiny_setup):
     assert result.importance(weighted=True).index.tolist() == imp.index.tolist()
 
 
+def test_importance_band_spans_the_ensemble_members(tiny_setup):
+    frame, clf, reg = tiny_setup
+    members = [EnsembleMember(1, clf, reg), EnsembleMember(2, clf, reg)]
+    result = combined_shap(FakeDataset(frame), members, "female")
+
+    for weighted in (False, True):
+        band = result.importance_band(weighted=weighted)
+        assert list(band.columns) == ["mean", "lower", "upper"]
+        assert band["mean"].is_monotonic_decreasing
+        assert (band["lower"] <= band["mean"] + 1e-12).all()
+        assert (band["mean"] <= band["upper"] + 1e-12).all()
+        assert band.index[0] == "x1"
+
+    # identical members: no spread, and the same importance as the averaged attribution
+    band = result.importance_band()
+    np.testing.assert_allclose(band["upper"], band["lower"], atol=1e-9)
+    np.testing.assert_allclose(band["mean"], result.importance()[band.index], atol=1e-9)
+
+
+def test_plot_importance_draws_uncertainty_band(tiny_setup):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from egypt_survey_ml.explain import plot_importance
+
+    frame, clf, reg = tiny_setup
+    result = combined_shap(FakeDataset(frame), [EnsembleMember(1, clf, reg)], "female")
+    ax = plot_importance(result.importance_band(), top=3)
+    assert len(ax.get_yticklabels()) == 3
+    assert any(c.__class__.__name__ == "ErrorbarContainer" for c in ax.containers)
+    plt.close("all")
+
+
 def test_combined_shap_keeps_numeric_feature_values_for_colouring(tiny_setup):
     frame, clf, reg = tiny_setup
     result = combined_shap(

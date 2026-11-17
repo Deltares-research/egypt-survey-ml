@@ -69,6 +69,8 @@ class CombinedShap:
     base_value: float
     weight: np.ndarray
     n_members: int
+    member_importance: pd.DataFrame | None = None
+    member_importance_weighted: pd.DataFrame | None = None
 
     def importance(self, weighted=False) -> pd.Series:
         """Mean absolute attribution per feature (EGP), largest first.
@@ -81,6 +83,33 @@ class CombinedShap:
         else:
             imp = abs_vals.mean()
         return imp.sort_values(ascending=False)
+
+    def importance_band(self, weighted=False, level=0.9) -> pd.DataFrame:
+        """Feature importance with an uncertainty band from the spread over ensemble members.
+
+        Each member gives its own mean absolute attribution per feature. Returns a
+        DataFrame (features x ``mean``, ``lower``, ``upper``), largest ``mean`` first, where
+        ``mean`` is the average over members and ``lower``/``upper`` are the central
+        ``level`` quantile interval across members. Note that ``mean`` is the mean of the
+        per-member importances, which is slightly larger than :meth:`importance`, which
+        takes the absolute value of the member-averaged attribution. With one member the
+        band has zero width.
+        """
+        per_member = (
+            self.member_importance_weighted if weighted else self.member_importance
+        )
+        if per_member is None:
+            raise ValueError("per-member importances are not available")
+        if not 0 < level < 1:
+            raise ValueError("level must be between 0 and 1")
+        band = pd.DataFrame(
+            {
+                "mean": per_member.mean(),
+                "lower": per_member.quantile((1 - level) / 2),
+                "upper": per_member.quantile((1 + level) / 2),
+            }
+        )
+        return band.sort_values("mean", ascending=False)
 
 
 def combined_shap(
@@ -105,6 +134,7 @@ def combined_shap(
         raise ValueError("no ensemble members given")
 
     total, feature_total, base, weight = None, None, 0.0, None
+    member_imp, member_imp_weighted = [], []
     for member in members:
         clf = _as_model(member.classifier, CatBoostClassifier)
         reg = _as_model(member.regressor, CatBoostRegressor)
@@ -129,6 +159,9 @@ def combined_shap(
             if pd.api.types.is_numeric_dtype(col)
             else np.nan
         )
+        w = real.weight if weight is None else weight
+        member_imp.append(phi.abs().mean())
+        member_imp_weighted.append(phi.abs().mul(w, axis=0).sum() / np.sum(w))
         total = phi if total is None else total.add(phi, fill_value=0)
         feature_total = (
             feature_values
@@ -146,16 +179,35 @@ def combined_shap(
         base_value=base / n,
         weight=weight,
         n_members=n,
+        member_importance=pd.DataFrame(member_imp).reset_index(drop=True),
+        member_importance_weighted=pd.DataFrame(member_imp_weighted).reset_index(
+            drop=True
+        ),
     )
 
 
-def plot_importance(importance: pd.Series, top=20, ax=None, title=None):
-    """Horizontal bar chart of the ``top`` most important features."""
+def plot_importance(importance, top=20, ax=None, title=None):
+    """Horizontal bar chart of the ``top`` most important features.
+
+    ``importance`` is a Series, or the DataFrame from
+    :meth:`CombinedShap.importance_band`, in which case the bars show ``mean`` and
+    error bars show the ``lower``-``upper`` uncertainty band over ensemble members.
+    """
     import matplotlib.pyplot as plt
 
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 0.35 * min(top, len(importance)) + 1.5))
-    importance.head(top).iloc[::-1].plot.barh(ax=ax, color="#0072B2")
+    if isinstance(importance, pd.DataFrame):
+        data = importance.head(top).iloc[::-1]
+        mean = data["mean"]
+        xerr = np.vstack(
+            [(mean - data["lower"]).clip(lower=0), (data["upper"] - mean).clip(lower=0)]
+        )
+        mean.plot.barh(
+            ax=ax, color="#0072B2", xerr=xerr, error_kw={"ecolor": "black", "capsize": 3}
+        )
+    else:
+        importance.head(top).iloc[::-1].plot.barh(ax=ax, color="#0072B2")
     ax.set_xlabel("Mean |attribution| to predicted wage (EGP)")
     ax.set_ylabel("")
     if title:
