@@ -14,7 +14,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier, CatBoostRegressor
-from sklearn.metrics import r2_score
+from sklearn.metrics import r2_score, mean_absolute_error
 
 STAT_NAMES = [
     "p5",
@@ -206,6 +206,15 @@ class EnsemblePrediction:
             else self.thresholded_wage(threshold)
         )
         return np.array([r2_score(self.true_income, p) for p in pred])
+    
+    def mae_per_member(self, threshold=None):
+        """Return the mean absolute error in EGP for each ensemble member."""
+        pred = (
+            self.expected_wage
+            if threshold is None
+            else self.thresholded_wage(threshold)
+        )
+        return np.array([mean_absolute_error(self.true_income, p) for p in pred])
 
     def mean_by_command_unit(self, values=None, units=None, weighted=True):
         """Mean predicted wage per command unit.
